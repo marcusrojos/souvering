@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Package, Building2, Users, LogOut, Truck, Route, FileText, ClipboardList, Box, Network, History } from 'lucide-react';
+import { LayoutDashboard, Package, Building2, Users, LogOut, Truck, Route, FileText, ClipboardList, Box, Network, History, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import dpciLogo from '@/assets/dpci-logo.png';
@@ -26,6 +26,7 @@ function getNavItems(role: string | null): NavItem[] {
     return [
       { icon: Network, label: 'Sites', href: '/admin/sites' },
       ...adminNavItems,
+      { icon: Settings, label: 'Paramètres', href: '/admin/settings' },
     ];
   }
   if (role === 'admin') return adminNavItems;
