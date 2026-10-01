@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Menu, LayoutDashboard, Package, Building2, Users, LogOut, Truck, Route, FileText, ClipboardList, Box, Network, History } from 'lucide-react';
+import { Menu, LayoutDashboard, Package, Building2, Users, LogOut, Truck, Route, FileText, ClipboardList, Box, Network, History, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/lib/auth';
 import dpciLogo from '@/assets/dpci-logo.png';
@@ -26,7 +26,7 @@ const pharmacyNavItems: NavItem[] = [{ icon: Package, label: 'Mes Livraisons', h
 
 function getNavItems(role: string | null): NavItem[] {
   if (role === 'super_admin') {
-    return [{ icon: Network, label: 'Sites', href: '/admin/sites' }, ...adminNavItems];
+    return [{ icon: Network, label: 'Sites', href: '/admin/sites' }, ...adminNavItems, { icon: Settings, label: 'Paramètres', href: '/admin/settings' }];
   }
   if (role === 'admin') return adminNavItems;
   if (role === 'pharmacie') return pharmacyNavItems;

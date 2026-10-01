@@ -1,3 +1,4 @@
+import { usePackageTypes, detectPackageType } from '@/hooks/use-package-types';
 import { useState, useEffect } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent } from '@/components/ui/card';
