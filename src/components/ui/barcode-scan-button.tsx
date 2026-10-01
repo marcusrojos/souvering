@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
 import { ScanLine, Loader2, CameraOff, RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 
 interface BarcodeScanButtonProps {
@@ -16,15 +15,16 @@ interface BarcodeScanButtonProps {
   continuous?: boolean;
 }
 
-const FORMATS = [
-  'code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e',
-  'itf', 'codabar', 'qr_code', 'data_matrix', 'pdf417',
-];
-
 /**
  * Reusable camera barcode scanner.
- * Uses the native BarcodeDetector API when available (fast, hardware accelerated),
- * and falls back to ZXing for browsers/webviews without it.
+ *
+ * Detection 100% pur JavaScript via ZXing (@zxing/browser + @zxing/library).
+ * On bannit deliberement `window.BarcodeDetector` (MLKit) : sur les terminaux
+ * durcis Sunmi (Android 12 / AOSP sans services Google Play complets), son
+ * moteur C++ natif appelle une couche MLKit absente, ce qui provoque un
+ * dereferencement memoire natif (SIGSEGV) : le processus WebView est tue
+ * immediatement, sans qu'aucun try/catch JavaScript ne puisse l'intercepter.
+ * ZXing s'execute entierement en memoire JS/Wasm securisee, sans binaire natif.
  */
 export function BarcodeScanButton({
   onScan,
@@ -40,18 +40,23 @@ export function BarcodeScanButton({
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const rafRef = useRef<number | null>(null);
   const zxingControlsRef = useRef<{ stop: () => void } | null>(null);
   const stoppedRef = useRef(false);
   const lastValueRef = useRef<{ code: string; at: number }>({ code: '', at: 0 });
 
   const stopAll = useCallback(() => {
     stoppedRef.current = true;
-    if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    // 1. Arreter le lecteur ZXing
     try { zxingControlsRef.current?.stop(); } catch { /* ignore */ }
     zxingControlsRef.current = null;
-    streamRef.current?.getTracks().forEach(t => t.stop());
-    streamRef.current = null;
+
+    // 2. Stopper toutes les pistes du flux et detacher la video
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
+        try { track.stop(); } catch { /* ignore */ }
+      });
+      streamRef.current = null;
+    }
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
@@ -59,7 +64,7 @@ export function BarcodeScanButton({
     const code = raw.trim();
     if (!code) return;
     const now = Date.now();
-    // Debounce identical reads (avoids duplicate submissions from rapid frames)
+    // Deboublonnage des lectures identiques et rapprochees
     if (lastValueRef.current.code === code && now - lastValueRef.current.at < 1500) return;
     lastValueRef.current = { code, at: now };
 
@@ -77,34 +82,48 @@ export function BarcodeScanButton({
     setError(null);
     setStarting(true);
     stoppedRef.current = false;
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-        audio: false,
-      });
+      // 1. Acquisition du flux avec fallback de resolution (pilotes sensibles)
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280, max: 1280 },
+            height: { ideal: 720, max: 720 },
+            frameRate: { ideal: 30, max: 30 },
+          },
+          audio: false,
+        });
+      } catch {
+        // Fallback contraintes minimales (Sunmi/AOSP : HAL fragiles > 720p)
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment' },
+          audio: false,
+        });
+      }
+
+      if (stoppedRef.current) {
+        stream.getTracks().forEach((t) => { try { t.stop(); } catch { /* ignore */ } });
+        return;
+      }
       streamRef.current = stream;
+      // Mise au point continue : garder le capteur Sunmi net, sinon le flux
+      // se floute et la lecture ralentit. focusMode n'etant pas expose par le
+      // type DOM (MediaTrackConstraints), on le transmet via un cast.
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
-        const track = videoTrack as unknown as {
-          getCapabilities?: () => { focusMode?: string[]; zoom?: { min: number; max: number } };
-          applyConstraints: (constraints: { advanced?: Array<Record<string, unknown>> }) => Promise<void>;
-        };
         try {
-          const capabilities = track.getCapabilities?.();
-          const advanced: Record<string, unknown> = {};
-          if (capabilities?.focusMode?.includes('continuous')) advanced.focusMode = 'continuous';
-          if (capabilities?.zoom && capabilities.zoom.max > capabilities.zoom.min) {
-            advanced.zoom = Math.min(capabilities.zoom.max, Math.max(capabilities.zoom.min, 1.5));
-          }
-          if (Object.keys(advanced).length > 0) await track.applyConstraints({ advanced: [advanced] });
-        } catch { /* autofocus and zoom are optional */ }
+          await videoTrack.applyConstraints({ focusMode: 'continuous' } as MediaTrackConstraints);
+        } catch {
+          /* pilote Sunmi sans support du mode continu : on ignore */
+        }
       }
+
       const video = videoRef.current;
       if (!video) return;
+
       video.srcObject = stream;
       video.setAttribute('playsinline', 'true');
       await new Promise<void>((resolve) => {
@@ -113,58 +132,38 @@ export function BarcodeScanButton({
       });
       await video.play();
 
-      const Detector = (window as any).BarcodeDetector;
-      if (Detector) {
-        let supported: string[] = FORMATS;
-        try {
-          const avail: string[] = await Detector.getSupportedFormats();
-          supported = FORMATS.filter(f => avail.includes(f));
-        } catch { /* keep defaults */ }
-        const detector = new Detector(supported.length ? { formats: supported } : undefined);
+      // 2. Detection 100% ZXing (pur JS/Wasm) - jamais de BarcodeDetector
+      const [{ BrowserMultiFormatReader }, { DecodeHintType, BarcodeFormat }] = await Promise.all([
+        import('@zxing/browser'),
+        import('@zxing/library'),
+      ]);
 
-        const loop = async () => {
-          if (stoppedRef.current) return;
-          try {
-            if (video.readyState >= 2) {
-              const codes = await detector.detect(video);
-              if (codes && codes.length > 0 && codes[0].rawValue) {
-                handleResult(String(codes[0].rawValue));
-              }
-            }
-          } catch { /* transient frame errors are ignored */ }
-          if (!stoppedRef.current) rafRef.current = requestAnimationFrame(() => { void loop(); });
-        };
-        void loop();
-      } else {
-        // ZXing fallback
-        const [{ BrowserMultiFormatReader }, { DecodeHintType, BarcodeFormat }] = await Promise.all([
-          import('@zxing/browser'),
-          import('@zxing/library'),
-        ]);
-        const hints = new Map();
-        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-          BarcodeFormat.CODE_128, BarcodeFormat.CODE_39, BarcodeFormat.CODE_93, BarcodeFormat.EAN_13,
-          BarcodeFormat.EAN_8, BarcodeFormat.UPC_A, BarcodeFormat.UPC_E,
-          BarcodeFormat.ITF, BarcodeFormat.CODABAR, BarcodeFormat.RSS_14,
-          BarcodeFormat.RSS_EXPANDED, BarcodeFormat.QR_CODE,
-          BarcodeFormat.DATA_MATRIX, BarcodeFormat.PDF_417,
-        ]);
-        hints.set(DecodeHintType.TRY_HARDER, true);
-        const reader = new BrowserMultiFormatReader(hints, {
-          delayBetweenScanAttempts: 120,
-          delayBetweenScanSuccess: 500,
-        });
-        const controls = await reader.decodeFromVideoElement(video, (result) => {
-          if (result) handleResult(result.getText());
-        });
-        zxingControlsRef.current = controls as any;
-      }
+      if (stoppedRef.current) return;
+
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.CODE_128, BarcodeFormat.EAN_13,
+        BarcodeFormat.CODE_39, BarcodeFormat.QR_CODE,
+        BarcodeFormat.ITF,
+      ]);
+      hints.set(DecodeHintType.TRY_HARDER, false);
+
+      const reader = new BrowserMultiFormatReader(hints, {
+        delayBetweenScanAttempts: 40,
+        delayBetweenScanSuccess: 500,
+      });
+
+      const controls = await reader.decodeFromVideoElement(video, (result) => {
+        if (result && !stoppedRef.current) handleResult(result.getText());
+      });
+      zxingControlsRef.current = controls as any;
     } catch (e: any) {
+      console.error('[BarcodeScan] Erreur demarrage camera:', e);
       const msg = e?.name === 'NotAllowedError'
-        ? "Accès à la caméra refusé. Autorisez la caméra puis réessayez."
+        ? "Acces a la camera refuse. Veuillez autoriser la camera dans les parametres de l'application."
         : e?.name === 'NotFoundError'
-          ? "Aucune caméra détectée sur cet appareil."
-          : "Impossible de démarrer la caméra.";
+          ? 'Aucune camera detectee sur cet appareil.'
+          : "Impossible d'acceder a la camera.";
       setError(msg);
     } finally {
       setStarting(false);
@@ -190,7 +189,7 @@ export function BarcodeScanButton({
         size={size}
         className={cn(size === 'icon' && 'shrink-0', className)}
         onClick={() => setOpen(true)}
-        title="Scanner avec la caméra"
+        title="Scanner avec la camera"
       >
         <ScanLine className={cn('w-4 h-4', label && 'mr-1.5')} />
         {label}
@@ -211,7 +210,7 @@ export function BarcodeScanButton({
           <div className="space-y-3">
             <div className="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
               <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-              {/* Aiming frame */}
+              {/* Cadre de visee */}
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                 <div className="w-[80%] h-[40%] border-2 border-primary/80 rounded-lg shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
               </div>
