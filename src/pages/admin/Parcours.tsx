@@ -394,7 +394,7 @@ export default function AdminParcours() {
         const entry = countsByPharmacy.get(pharmId) || { cartons: 0, sachets: 0, bacs: 0, packages: [] };
         if (c.type === 'carton') entry.cartons++;
         else if (c.type === 'sachet') entry.sachets++;
-        else entry.bacs++;
+        else if (c.type === 'bac') entry.bacs++;
         entry.packages.push({ barcode: c.barcode, type: c.type });
         countsByPharmacy.set(pharmId, entry);
       });
@@ -502,6 +502,11 @@ export default function AdminParcours() {
       }
       return next;
     });
+  };
+
+  const setEditBarcode = (id: string, barcode: string) => {
+    const detected = detectPackageType(barcode, packageTypes);
+    setEditColisList(prev => prev.map(x => x.id === id ? { ...x, barcode, ...(detected ? { type: detected } : {}) } : x));
   };
 
   const addEditColis = (pharmacyId: string) => {
@@ -858,24 +863,18 @@ export default function AdminParcours() {
                           }}>
                             <SelectTrigger className="w-[90px] h-8 text-xs"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="carton">Carton</SelectItem>
-                              <SelectItem value="sachet">Sachet</SelectItem>
-                              <SelectItem value="bac">Bac</SelectItem>
+                              {packageTypes.map(t => <SelectItem key={t.code} value={t.code}>{t.label}</SelectItem>)}
                             </SelectContent>
                           </Select>
                           <Input
                             value={c.barcode}
-                            onChange={e => {
-                              setEditColisList(prev => prev.map(x => x.id === c.id ? { ...x, barcode: e.target.value } : x));
-                            }}
+                            onChange={e => setEditBarcode(c.id, e.target.value)}
                             className="h-8 text-xs flex-1"
                             placeholder="Code-barres"
                           />
                           <BarcodeScanButton
                             className="h-8 w-8"
-                            onScan={(code) => {
-                              setEditColisList(prev => prev.map(x => x.id === c.id ? { ...x, barcode: code } : x));
-                            }}
+                            onScan={(code) => setEditBarcode(c.id, code)}
                           />
 
                           <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => {

@@ -50,7 +50,7 @@ interface AxisPharmacy {
 
 interface ColisItem {
   id: string;
-  type: 'carton' | 'sachet' | 'bac';
+  type: string;
   barcode: string;
 }
 
@@ -67,6 +67,7 @@ let colisCounter = 0;
 const newColisId = () => `colis-${++colisCounter}-${Date.now()}`;
 
 export function CreateParcoursWizard({ open, onOpenChange, onCreated }: CreateParcoursWizardProps) {
+  const { types: packageTypes } = usePackageTypes();
   const [step, setStep] = useState(0);
   const [axes, setAxes] = useState<Axis[]>([]);
   const [drivers, setDrivers] = useState<Driver[]>([]);
@@ -371,10 +372,11 @@ export function CreateParcoursWizard({ open, onOpenChange, onCreated }: CreatePa
   };
 
   const updateColis = (pharmacyId: string, colisId: string, field: 'type' | 'barcode', value: string) => {
+    const detected = field === 'barcode' ? detectPackageType(value, packageTypes) : null;
     setPharmacyPackages(prev => ({
       ...prev,
       [pharmacyId]: (prev[pharmacyId] || []).map(c =>
-        c.id === colisId ? { ...c, [field]: value } : c
+        c.id === colisId ? { ...c, [field]: value, ...(detected ? { type: detected } : {}) } : c
       ),
     }));
   };
@@ -686,9 +688,7 @@ export function CreateParcoursWizard({ open, onOpenChange, onCreated }: CreatePa
                                         <SelectValue />
                                       </SelectTrigger>
                                       <SelectContent>
-                                        <SelectItem value="carton">Carton</SelectItem>
-                                        <SelectItem value="sachet">Sachet</SelectItem>
-                                        <SelectItem value="bac">Bac</SelectItem>
+                                        {packageTypes.map(t => <SelectItem key={t.code} value={t.code}>{t.label}</SelectItem>)}
                                       </SelectContent>
                                     </Select>
                                     <div className="flex-1 relative">
