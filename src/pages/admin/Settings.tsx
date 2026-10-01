@@ -102,7 +102,7 @@ export default function Settings() {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout requiredRole="admin" allowSuperAdmin>
       <div className="space-y-6 max-w-3xl">
         <div>
           <h1 className="text-2xl font-bold">Paramètres</h1>

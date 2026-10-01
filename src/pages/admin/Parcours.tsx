@@ -112,6 +112,7 @@ export default function AdminParcours() {
   const [editDrivers, setEditDrivers] = useState<{ user_id: string; full_name: string }[]>([]);
   const [editDriverId, setEditDriverId] = useState('');
   // Colis editing
+  const { types: packageTypes } = usePackageTypes();
   const [editColisList, setEditColisList] = useState<ParcoursColis[]>([]);
   // Parcours pharmacies map (pharmacy_id -> parcours_pharmacy_id)
   const [editPharmIdMap, setEditPharmIdMap] = useState<Map<string, string>>(new Map());
